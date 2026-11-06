@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#14532d"><title>Expense Book – OneDrive Sync</title>
+<style>
+:root{--g:#14532d;--g2:#166534;--bg:#f4f7f4;--ink:#17231b;--muted:#68756c;--line:#e3eae4;--red:#b42318}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{background:var(--g);color:white;padding:20px 18px 26px;border-radius:0 0 22px 22px}h1{font-size:23px;margin:0 0 4px}header p{font-size:13px;color:#d9eadc;margin:0}
+main{max-width:640px;margin:-10px auto 30px;padding:0 13px}
+.syncbar{background:white;border:1px solid var(--line);border-radius:14px;padding:11px 13px;display:flex;gap:10px;align-items:center;margin-bottom:10px;font-size:13px}
+.dot{width:9px;height:9px;border-radius:50%;background:#c17b14;flex-shrink:0}.dot.ok{background:#21864b}.syncinfo{flex:1;min-width:0}.syncinfo strong{display:block}.syncinfo small{color:var(--muted)}
+button,input,select{font:inherit;min-width:0;border:1px solid var(--line);border-radius:11px;padding:11px;background:white;color:var(--ink)}
+button{cursor:pointer}button:disabled{opacity:.5;cursor:not-allowed}
+nav{display:flex;gap:8px;padding:8px 0 13px;position:sticky;top:0;background:var(--bg);z-index:2}
+nav button{flex:1;border-radius:22px;font-weight:650}nav button.active{background:var(--g);color:white;border-color:var(--g)}
+.page{display:none}.page.active{display:block}.card{background:white;border:1px solid var(--line);border-radius:16px;padding:15px;margin-bottom:12px;box-shadow:0 3px 12px #183b2008}
+h2{font-size:16px;margin:0 0 12px}form{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+input:focus,select:focus{outline:2px solid #8ab99a;border-color:transparent}.full{grid-column:1/-1}
+.primary{background:var(--g2);color:white;border:0;font-weight:700}.secondary{background:#edf5ee;color:var(--g);border-color:#d9e8dc}
+.summary{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.muted{font-size:12px;color:var(--muted);line-height:1.5}.total{font-size:24px;font-weight:800}
+.filters{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+.item{display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid var(--line)}.item:last-child{border:0}
+.ico{width:40px;height:40px;display:grid;place-items:center;background:#edf5ee;border-radius:13px;font-size:19px;flex-shrink:0}
+.detail{flex:1;min-width:0}.detail strong{display:block;font-size:14px;overflow-wrap:anywhere}.detail small{display:block;color:var(--muted);font-size:12px;margin-top:3px}
+.amount{font-weight:750;white-space:nowrap}.del{display:block;border:0;background:transparent;color:var(--red);font-size:12px;padding:4px 0 0 4px;margin-left:auto}
+.empty{text-align:center;color:var(--muted);padding:24px 8px;font-size:14px}.source-row{display:flex;gap:8px;align-items:center;margin:8px 0}.source-row span{flex:1;font-size:14px}.source-row button{padding:7px 10px;color:var(--red);font-size:12px}
+.notice{background:#fff8e8;border:1px solid #f0dfb6;border-radius:12px;padding:12px;font-size:13px;line-height:1.5;margin-bottom:12px}
+@media(max-width:380px){form{grid-template-columns:1fr}.full{grid-column:auto}}
+</style>
+<script src="https://alcdn.msauth.net/browser/3.28.1/js/msal-browser.min.js"></script>
+</head>
+<body>
+<header><h1>Expense Book</h1><p>Your expenses, securely synced with your OneDrive</p></header>
+<main>
+<div class="syncbar"><span id="syncDot" class="dot"></span><div class="syncinfo"><strong id="syncTitle">Not connected to OneDrive</strong><small id="syncMessage">Sign in to load and sync your expense book.</small></div><button id="signBtn" class="primary">Sign in</button></div>
+<div id="setupNotice" class="notice">One-time setup required: add your Microsoft Application (Client) ID in the app configuration. See the setup guide provided with this app.</div>
+<nav><button class="active" data-page="addPage">＋ Add Expense</button><button data-page="listPage">Expense List</button><button data-page="sourcesPage">Accounts & Cards</button></nav>
+<section id="addPage" class="page active">
+ <div class="card"><h2>Add a new expense</h2><form id="expenseForm">
+ <input class="full" id="description" placeholder="Expense description (e.g. Petrol)" maxlength="80" required>
+ <input id="amount" type="number" min="0.01" step="0.01" placeholder="Amount (₹)" required>
+ <input id="date" type="date" required>
+ <select id="category"><option>Food</option><option>Groceries</option><option>Fuel</option><option>Transport</option><option>Shopping</option><option>Bills</option><option>Rent</option><option>Health</option><option>Travel</option><option>Entertainment</option><option>Other</option></select>
+ <select id="source" class="full" required></select><input id="notes" class="full" placeholder="Notes (optional)">
+ <button class="primary full" id="saveExpense" type="submit" disabled>Save Expense</button>
+ </form></div>
+ <div class="card"><div class="summary"><div><div class="muted">This month's expenses</div><div class="total" id="monthTotal">₹0</div></div><div style="text-align:right"><div class="muted">Transactions</div><strong id="monthCount">0</strong></div></div><div class="muted">Expenses are stored in your OneDrive app folder after you sign in.</div></div>
+</section>
+<section id="listPage" class="page"><div class="card">
+ <div class="summary"><div><div class="muted">Total expenses shown</div><div class="total" id="filteredTotal">₹0</div></div><div style="text-align:right"><div class="muted">Records</div><strong id="filteredCount">0</strong></div></div>
+ <div class="filters"><input id="filterMonth" type="month" aria-label="Filter month"><select id="filterSource"><option value="">All accounts/cards</option></select></div>
+ <input id="search" class="full" style="width:100%;margin-bottom:8px" placeholder="Search description or category"><div id="expenseList"></div>
+ </div></section>
+<section id="sourcesPage" class="page">
+ <div class="card"><h2>Add bank account or credit card</h2><form id="sourceForm">
+ <select id="sourceType"><option>Bank account</option><option>Credit card</option><option>Debit card</option><option>Cash</option><option>Other</option></select>
+ <input id="sourceName" placeholder="Name (e.g. HDFC Savings)" maxlength="50" required>
+ <input id="sourceSuffix" placeholder="Last 4 digits (optional)" inputmode="numeric" maxlength="4">
+ <button class="primary" type="submit" id="addSource" disabled>Add source</button></form>
+ <p class="muted">Use a nickname and optionally the last four digits only. Never enter your full card number, CVV, PIN or banking password.</p></div>
+ <div class="card"><h2>Saved accounts and cards</h2><div id="sourceList"></div></div>
+</section>
+<p class="muted">Sync uses Microsoft Graph delegated access to this app's OneDrive application folder. This app does not store your Microsoft password. Use only on a trusted device and sign out when finished on a shared device.</p>
+</main>
+<script>
+/* SETUP: paste your Microsoft Entra App Registration's Application (client) ID below.
+   Register this app as a Single-page application (SPA), add the exact HTTPS redirect URI,
+   enable personal Microsoft accounts if needed, and grant delegated Files.ReadWrite.AppFolder.
+*/
+const CLIENT_ID="9f82a9a5-7580-4987-a1bb-3d31de3f33bd";
+const REDIRECT_URI=window.location.origin+window.location.pathname;
+const AUTHORITY="https://login.microsoftonline.com/common";
+const SCOPES=["Files.ReadWrite.AppFolder"];
+const FILE_PATH="/me/drive/special/approot:/expense-book.json";
+const $=id=>document.getElementById(id);
+const localDate=d=>{const x=new Date(d.getTime()-d.getTimezoneOffset()*60000);return x.toISOString().slice(0,10)};
+const today=localDate(new Date()),monthNow=today.slice(0,7);
+let db={sources:[{id:"cash-default",type:"Cash",name:"Cash",suffix:""}],expenses:[]};
+let msalApp=null,account=null,accessToken=null,connected=false,saveTimer=null,saving=false;
+$('date').value=today;$('filterMonth').value=monthNow;
+function setStatus(title,msg,ok=false){$('syncTitle').textContent=title;$('syncMessage').textContent=msg;$('syncDot').className='dot'+(ok?' ok':'')}
+function setEnabled(v){$('saveExpense').disabled=!v;$('addSource').disabled=!v;$('signBtn').textContent=v?'Sign out':'Sign in'}
+function sourceLabel(s){return s.name+(s.suffix?' •••• '+s.suffix:'')+' ('+s.type+')'}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function money(n){return new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:2}).format(n||0)}
+function refreshSourceOptions(){const opts=db.sources.map(s=>`<option value="${esc(s.id)}">${esc(sourceLabel(s))}</option>`).join('');$('source').innerHTML=opts||'<option value="">Add an account/card first</option>';const old=$('filterSource').value;$('filterSource').innerHTML='<option value="">All accounts/cards</option>'+opts;$('filterSource').value=old}
+function render(){
+ refreshSourceOptions();const m=db.expenses.filter(x=>x.date.startsWith(monthNow));$('monthTotal').textContent=money(m.reduce((a,x)=>a+x.amount,0));$('monthCount').textContent=m.length;
+ const fm=$('filterMonth').value,fs=$('filterSource').value,q=$('search').value.trim().toLowerCase();
+ const list=db.expenses.filter(x=>(!fm||x.date.startsWith(fm))&&(!fs||x.sourceId===fs)&&(!q||(x.description+' '+x.category+' '+x.notes).toLowerCase().includes(q))).sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id);
+ $('filteredTotal').textContent=money(list.reduce((a,x)=>a+x.amount,0));$('filteredCount').textContent=list.length;$('expenseList').innerHTML='';
+ if(!list.length)$('expenseList').innerHTML='<div class="empty">No expenses found. Add an expense or change your filters.</div>';
+ list.forEach(x=>{const s=db.sources.find(s=>s.id===x.sourceId);const row=document.createElement('div');row.className='item';const ico=document.createElement('div');ico.className='ico';ico.textContent=({Food:'🍽️',Groceries:'🛒',Fuel:'⛽',Transport:'🚌',Shopping:'🛍️',Bills:'🧾',Rent:'🏠',Health:'💊',Travel:'🧳',Entertainment:'🎬',Other:'📌'})[x.category]||'📌';const d=document.createElement('div');d.className='detail';const t=document.createElement('strong');t.textContent=x.description;const meta=document.createElement('small');meta.textContent=x.category+' · '+x.date+' · '+(s?sourceLabel(s):'Source removed')+(x.notes?' · '+x.notes:'');d.append(t,meta);const right=document.createElement('div');right.style.textAlign='right';const amt=document.createElement('div');amt.className='amount';amt.textContent=money(x.amount);const del=document.createElement('button');del.className='del';del.textContent='Delete';del.onclick=()=>{if(confirm('Delete this expense from your OneDrive expense book?')){db.expenses=db.expenses.filter(y=>y.id!==x.id);render();queueSave()}};right.append(amt,del);row.append(ico,d,right);$('expenseList').append(row)});
+ $('sourceList').innerHTML='';db.sources.forEach(s=>{const row=document.createElement('div');row.className='source-row';const label=document.createElement('span');label.textContent='💳  '+sourceLabel(s);row.append(label);if(s.id!=='cash-default'){const del=document.createElement('button');del.textContent='Remove';del.onclick=()=>{if(db.expenses.some(x=>x.sourceId===s.id)){alert('This source is used by saved expenses. Keep it so history stays accurate.');return}if(confirm('Remove this source?')){db.sources=db.sources.filter(x=>x.id!==s.id);render();queueSave()}};row.append(del)}$('sourceList').append(row)});if(!db.sources.length)$('sourceList').innerHTML='<div class="empty">No accounts or cards added.</div>';
+}
+async function graph(path,options={}){const res=await fetch('https://graph.microsoft.com/v1.0'+path,{...options,headers:{Authorization:'Bearer '+accessToken,...(options.headers||{})}});if(!res.ok){const body=await res.text();throw new Error('Microsoft Graph '+res.status+': '+body.slice(0,350))}return res}
+async function getToken(){const req={scopes:SCOPES,account};try{return (await msalApp.acquireTokenSilent(req)).accessToken}catch(e){return (await msalApp.acquireTokenPopup(req)).accessToken}}
+async function loadCloud(){accessToken=await getToken();try{const res=await graph(FILE_PATH+':/content');db=await res.json();if(!db||!Array.isArray(db.sources)||!Array.isArray(db.expenses))throw new Error('The OneDrive expense file has an unexpected format.')}catch(e){if(String(e.message).includes('Graph 404')){db={sources:[{id:'cash-default',type:'Cash',name:'Cash',suffix:''}],expenses:[]};await uploadCloud()}else throw e}render();connected=true;setEnabled(true);setStatus('Connected to OneDrive',`Signed in as ${account.username}. Expense book loaded.`,true)}
+async function uploadCloud(){if(!accessToken)accessToken=await getToken();await graph(FILE_PATH+':/content',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(db,null,2)});setStatus('Synced to OneDrive','Your latest changes are saved.',true)}
+function queueSave(){if(!connected)return;clearTimeout(saveTimer);setStatus('Changes pending','Saving to OneDrive…');saveTimer=setTimeout(async()=>{if(saving)return;saving=true;try{await uploadCloud()}catch(e){setStatus('Sync failed',e.message);alert('Could not sync to OneDrive. Please check your internet connection and sign in again. '+e.message)}finally{saving=false}},700)}
+async function signIn(){if(CLIENT_ID.startsWith('PASTE_')){alert('First complete Microsoft setup: add your Application (client) ID to CLIENT_ID in this HTML file. Follow the included setup guide.');return}msalApp=new msal.PublicClientApplication({auth:{clientId:CLIENT_ID,authority:AUTHORITY,redirectUri:REDIRECT_URI},cache:{cacheLocation:'sessionStorage',storeAuthStateInCookie:false}});await msalApp.initialize();const response=await msalApp.loginPopup({scopes:SCOPES});account=response.account;msalApp.setActiveAccount(account);setStatus('Connecting…','Loading your OneDrive expense book.');try{await loadCloud()}catch(e){setEnabled(false);setStatus('Could not connect',e.message);alert('OneDrive connection failed: '+e.message)}}
+$('signBtn').onclick=async()=>{if(connected){if(!confirm('Sign out of OneDrive on this device? Unsynced changes will not be uploaded.'))return;connected=false;account=null;accessToken=null;setEnabled(false);setStatus('Signed out','Sign in to load your OneDrive expense book.');return}try{await signIn()}catch(e){setStatus('Sign-in failed',e.message);alert(e.message)}};
+$('expenseForm').onsubmit=e=>{e.preventDefault();const amount=Number($('amount').value);if(!connected){alert('Sign in to OneDrive before adding expenses.');return}if(!Number.isFinite(amount)||amount<=0||!db.sources.some(s=>s.id===$('source').value))return;db.expenses.push({id:Date.now()+Math.floor(Math.random()*9999),description:$('description').value.trim(),amount,date:$('date').value,category:$('category').value,sourceId:$('source').value,notes:$('notes').value.trim()});$('expenseForm').reset();$('date').value=today;render();queueSave();$('description').focus()};
+$('sourceForm').onsubmit=e=>{e.preventDefault();if(!connected)return;const name=$('sourceName').value.trim(),suffix=$('sourceSuffix').value.trim();if(!name)return;if(suffix&&!/^\d{4}$/.test(suffix)){alert('Enter exactly four digits or leave blank.');return}db.sources.push({id:'s'+Date.now(),type:$('sourceType').value,name,suffix});$('sourceForm').reset();render();queueSave()};
+document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-page]').forEach(x=>x.classList.toggle('active',x===b));document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id===b.dataset.page));render()});
+$('filterMonth').onchange=render;$('filterSource').onchange=render;$('search').oninput=render;
+render();setEnabled(false);
+if(CLIENT_ID.startsWith('PASTE_')){$('setupNotice').style.display='block'}else{$('setupNotice').style.display='none';$('signBtn').textContent='Sign in'}
+</script>
+</body></html>
